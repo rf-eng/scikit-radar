@@ -12,7 +12,7 @@ URL                 = 'https://github.com/rf-eng/scikit-radar'
 LICENSE             = 'MIT'
 PACKAGE_NAME        = 'skradar'
 EXTRA_INFO          = dict(
-    install_requires=['numpy', 'scipy'],
+    install_requires=['numpy', 'scipy', 'pytransform3d'],
     classifiers=['Development Status :: 1 - Planning',
                  'Intended Audience :: Developers',
                  'Intended Audience :: Science/Research',
