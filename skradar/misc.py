@@ -1,13 +1,13 @@
 import numpy as np
 
 
-def nextpow2(N: int):
+def nextpow2(N: float) -> int:
     """
     Returns the smallest integer x such that 2**x >= N
 
     Parameters
     ----------
-    N : int
+    N : float
         Input value that should be expressed as a power of two using an integer
         as exponent.
 

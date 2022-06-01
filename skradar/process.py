@@ -3,7 +3,8 @@ from scipy.constants import speed_of_light as c0
 from skradar import nextpow2
 
 def range_compress_FMCW(s_if: np.ndarray, B: float, zp_fact: float,
-                        c: float = c0, flatten_phase: bool = True):
+                        c: float = c0,
+                        flatten_phase: bool = True) -> tuple[np.ndarray, np.ndarray]:
     """
     Performs range-compression on the intermediate frequency (IF) data of an
     FMCW radar and returns the complex-valued range profile together with an
