@@ -1,7 +1,9 @@
+from abc import ABC, abstractmethod
 from pytransform3d.transformations import vector_to_point, transform
 from pytransform3d.transform_manager import TransformManager
 import pytransform3d.transformations as pt
 from pytransform3d.coordinates import spherical_from_cartesian
+from skradar import range_compress_FMCW
 import numpy as np
 import matplotlib.pyplot as plt
 plt.ion()
@@ -94,28 +96,72 @@ class Target(Thing):
         self.rcs = rcs
 
 
-class Radar(Thing):
+class Radar(Thing, ABC):
     """
     A class describing a generic radar (derived from Thing).
 
     The generic radar only allows to determine relative ranges and angles
-    between the radar and (several) target(s)
+    between the radar antennas and (several) target(s)
     
     Attributes:
     -----------
-        TODO:
-            TODO.
+        tx_pos : np.ndarray, shape(3, M_tx)
+            Local 3-d Cartesian coordinate(s) of the M_tx TX antenna(s) in meters.
+        rx_pos : np.ndarray, shape(3, M_rx)
+            Local 3-d Cartesian coordinate(s) of the M_rx RX antenna(s) in meters.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, tx_pos: np.ndarray, rx_pos: np.ndarray, **kwargs):
+        """
+        Create a radar object.
+
+        Parameters
+        ----------
+        tx_pos : np.ndarray, shape(3, M_tx)
+            Local 3-d Cartesian coordinate(s) of the M_tx TX antenna(s) in meters.
+        rx_pos : np.ndarray, shape(3, M_rx)
+            Local 3-d Cartesian coordinate(s) of the M_rx RX antenna(s) in meters.
+        **kwargs : optional
+            Remaining keyword arguments are passed to constructor of the
+            Thing class.
+
+        Returns
+        -------
+        None.
+
+        """
+        self.tx_pos = tx_pos
+        self.rx_pos = rx_pos
+        self.targets = None
         super().__init__(**kwargs)
 
-    def calc_target_locations(self, targets: list):
-        for target in targets:
+    def assign_targets(self, targets: list[Target]):
+        self.targets = targets
+
+    def calc_target_locations(self):
+        for target in self.targets:
             p_in_world = vector_to_point(target.pos)  # to homogeneous coords.
             p_in_radar = transform(self.world2loc, p_in_world)
             print(spherical_from_cartesian(p_in_radar[0:3]))
-    
+
+    @abstractmethod
+    def range_compression(self):
+        """
+        Needs to be implemented in subclass.
+
+        Returns
+        -------
+        None.
+
+        """
+        pass
+
+    def calc_radar_cube(self):
+        self.range_compression(self)
+        self.doppler_processing(self)
+        self.mimo_processing(self)
+        self.angle_processing(self)
+
 
 class FMCWRadar(Radar):
     """
@@ -129,11 +175,22 @@ class FMCWRadar(Radar):
         TODO:
             TODO.
     """
-    def __init__(self, B: float, fc: float, N: int, T_s: float):        
+
+    def __init__(self, B: float, fc: float, N: int, T_s: float, **kwargs):
         self.B = B
         self.fc = fc
         self.N = N
         self.T_s = T_s
+        self.s_if = None
+        super().__init__(**kwargs)
+
+    def range_compression(self):
+        if self.s_if is None:
+            raise TypeError(
+                's_if is None. It has to be simulated or loaded first')
+        else:
+            range_compress_FMCW(self.s_if, self.B, self.zp_fact, self.c,
+                                self.flatten_phase)
 
 
 class Scene:
@@ -190,14 +247,46 @@ if __name__ == "__main__":
     fc = 76.5e9
     N = 1024
     f_s = 1e6
-    radar = Radar(pos=np.array([0, 0, 0.3]), name='First radar')
+    reference_pos = np.array([0, 0, 0.3])
+    TxPosn = np.array([[-139.425, -20.25, 16.0],
+                       [-129.675, -20.25, 16.0],
+                       [-119.925, -20.25, 16.0],
+                       [-110.175, -20.25, 16.0],
+                       [-14.625, -20.25, 16.0],
+                       [-4.875, -20.25, 16.0],
+                       [4.875, -20.25, 16.0],
+                       [14.625, -20.25, 16.0],
+                       [110.175, -20.25, 16.0],
+                       [119.925, -20.25, 16.0],
+                       [129.675, -20.25, 16.0],
+                       [139.425, -20.25, 16.0]])*1e-3
+
+    RxPosn = np.array([[-62.4, 20.25, 16.0],
+                       [-54.6, 20.25, 16.0],
+                       [-46.8, 20.25, 16.0],
+                       [-39.0, 20.25, 16.0],
+                       [-31.2, 20.25, 16.0],
+                       [-23.4, 20.25, 16.0],
+                       [-15.6, 20.25, 16.0],
+                       [-7.8, 20.25, 16.0],
+                       [0.0, 20.25, 16.0],
+                       [7.8, 20.25, 16.0],
+                       [15.6, 20.25, 16.0],
+                       [23.4, 20.25, 16.0],
+                       [31.2, 20.25, 16.0],
+                       [39.0, 20.25, 16.0],
+                       [46.8, 20.25, 16.0],
+                       [54.6, 20.25, 16.0]])*1e-3
+    radar = FMCWRadar(B=B, fc=fc, N=N, T_s=1/f_s, tx_pos=TxPosn, rx_pos=RxPosn,
+                      pos=reference_pos, name='First radar')
     target1 = Target(rcs=1, pos=np.array(
         [0.2, 0.5, 0.5]), name='Small static target')
     target2 = Target(rcs=10, pos=np.array(
         [0, 0, 0.7]), name='Big static target')
     scene = Scene([radar], [target1, target2])
-    
-    radar.calc_target_locations([target1, target2])
+
+    radar.assign_targets([target1, target2])
+    radar.calc_target_locations()
 
     # Visualize scene
     fig = plt.figure(1)
@@ -212,6 +301,6 @@ if __name__ == "__main__":
     p_in_radar = transform(radar.world2loc, p_in_world)
     p_in_target1 = transform(target1.world2loc, p_in_world)
 
-    print(f'The point {p_in_world} in the world coordinate can be described as'\
-          f' {p_in_radar} in the coordinate system of the radar and as'\
+    print(f'The point {p_in_world} in the world coordinate can be described as'
+          f' {p_in_radar} in the coordinate system of the radar and as'
           f' {p_in_target1} in the coordinate system of target1.')
