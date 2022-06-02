@@ -1,6 +1,7 @@
 from pytransform3d.transformations import vector_to_point, transform
 from pytransform3d.transform_manager import TransformManager
 import pytransform3d.transformations as pt
+from pytransform3d.coordinates import spherical_from_cartesian
 import numpy as np
 import matplotlib.pyplot as plt
 plt.ion()
@@ -48,6 +49,7 @@ class Thing:
         omega : np.ndarray, shape (3, 1)
             Initial angular velocity vector. The default is np.zeros(3,1).
         """
+        self.pos = pos
         self.loc2world = pt.transform_from(
             R=rotation, p=pos.ravel())  # homogeneous coordinates
         self.world2loc = pt.invert_transform(self.loc2world)
@@ -94,10 +96,10 @@ class Target(Thing):
 
 class Radar(Thing):
     """
-    A class describing a radar (derived from Thing).
+    A class describing a generic radar (derived from Thing).
 
-    The radar has several settings (in addition to the position and
-    orientation information)
+    The generic radar only allows to determine relative ranges and angles
+    between the radar and (several) target(s)
     
     Attributes:
     -----------
@@ -107,6 +109,31 @@ class Radar(Thing):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
+    def calc_target_locations(self, targets: list):
+        for target in targets:
+            p_in_world = vector_to_point(target.pos)  # to homogeneous coords.
+            p_in_radar = transform(self.world2loc, p_in_world)
+            print(spherical_from_cartesian(p_in_radar[0:3]))
+    
+
+class FMCWRadar(Radar):
+    """
+    A class describing an FMCW radar (derived from Radar).
+
+    The FMCW radar has to be configured with some radar settings and allows
+    to simulate actual radar signals.
+    
+    Attributes:
+    -----------
+        TODO:
+            TODO.
+    """
+    def __init__(self, B: float, fc: float, N: int, T_s: float):        
+        self.B = B
+        self.fc = fc
+        self.N = N
+        self.T_s = T_s
 
 
 class Scene:
@@ -159,12 +186,18 @@ class Scene:
 
 
 if __name__ == "__main__":
+    B = 1e9
+    fc = 76.5e9
+    N = 1024
+    f_s = 1e6
     radar = Radar(pos=np.array([0, 0, 0.3]), name='First radar')
     target1 = Target(rcs=1, pos=np.array(
         [0.2, 0.5, 0.5]), name='Small static target')
     target2 = Target(rcs=10, pos=np.array(
         [0, 0, 0.7]), name='Big static target')
     scene = Scene([radar], [target1, target2])
+    
+    radar.calc_target_locations([target1, target2])
 
     # Visualize scene
     fig = plt.figure(1)
