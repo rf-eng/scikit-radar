@@ -4,7 +4,7 @@ from scipy.constants import speed_of_light as c0
 
 def sim_FMCW_if(r: float, B: float, fc: float, N: float, Ts: float,
                 v: float = 0, c: float = c0,
-                cplx: bool = False) -> tuple[np.ndarray, np.ndarray]:
+                cplx: bool = False) -> np.ndarray:
     """
     This function simulates the intermediate frequency (IF) signal of a
     single-chirp of an FMCW radar.
