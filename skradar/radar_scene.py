@@ -8,6 +8,7 @@ from pytransform3d.coordinates import spherical_from_cartesian
 from scipy.constants import speed_of_light as c0
 from skradar import range_compress_FMCW, sim_FMCW_if
 import numpy as np
+import scipy.signal
 import matplotlib.pyplot as plt
 plt.ion()
 
@@ -19,8 +20,8 @@ class Thing:
     Both location and orientation might change over time for non-zero
     velocities
     
-    Attributes:
-    -----------
+    Attributes
+    ----------
         pos:
             Vector describing the current position in Cartesian
             world coordinates.
@@ -98,8 +99,8 @@ class Target(Thing):
     A target has a radar cross section (in addition to the position and
     orientation information)
     
-    Attributes:
-    -----------
+    Attributes
+    ----------
         rcs:
             Radar cross section in square meters.
     """
@@ -114,7 +115,7 @@ class Target(Thing):
             Radar cross section in square meters.
 
         Other Parameters
-        ----------
+        ----------------
         **kwargs : optional
             Remaining keyword arguments are passed to constructor of the
             Thing class.
@@ -130,8 +131,8 @@ class Radar(Thing, ABC):
     The generic radar only allows to determine relative ranges and angles
     between the radar antennas and (several) target(s)
     
-    Attributes:
-    -----------
+    Attributes
+    ----------
         tx_pos : np.ndarray, shape(3, M_tx)
             Local 3-d Cartesian coordinate(s) of the M_tx TX antenna(s) in meters.
         rx_pos : np.ndarray, shape(3, M_rx)
@@ -179,8 +180,9 @@ class Radar(Thing, ABC):
 
     def calc_dists(self, delta_t: float = 0) -> np.ndarray:
         """
-        Calculate the distances between all target(s) and TX as well as RX
-        antennas. The optional time parameter delta_t can be used to
+        Calculate the distances between all target(s) and TX as well as RX antennas.
+        
+        The optional time parameter delta_t can be used to
         calculate varying distances within a CPI. It is assumed that target and
         radar velocities are constant over the CPI.
 
@@ -246,14 +248,14 @@ class FMCWRadar(Radar):
     The FMCW radar has to be configured with some radar settings and allows
     to simulate actual radar signals.
     
-    Attributes:
-    -----------
+    Attributes
+    ----------
         TODO:
             TODO.
     """
 
     def __init__(self, B: float, fc: float, N_f: int, N_s: int, T_f: float,
-                 T_s: float, **kwargs):
+                 T_s: float, win_range: str='hann', **kwargs):
         self.B = B
         self.fc = fc
         self.N_f = N_f
@@ -261,6 +263,7 @@ class FMCWRadar(Radar):
         self.T_f = T_f
         self.T_s = T_s
         self.s_if = None
+        self.win_range = scipy.signal.windows.get_window(win_range, N_f)
         super().__init__(**kwargs)
         self.t_s = np.arange(N_s)*T_s  # slow time vec. (unif. chirp sequence)
 
@@ -282,8 +285,9 @@ class FMCWRadar(Radar):
                 's_if is None. It has to be simulated or loaded first')
         else:
             flatten_phase = True
-            self.rp, self.ranges = range_compress_FMCW(self.s_if, self.B, zp_fact,
-                                          self.scene.c, flatten_phase)
+            self.rp, self.ranges = range_compress_FMCW(
+                self.s_if*self.win_range, self.B, zp_fact,
+                self.scene.c, flatten_phase)
 
 
 class Scene:
@@ -293,8 +297,8 @@ class Scene:
     The scene can include several radars and targets at different positions and
     with different orientations.
     
-    Attributes:
-    -----------
+    Attributes
+    ----------
         radars: list
             A list of Radar objects.
         targets: list
@@ -332,12 +336,8 @@ class Scene:
             self.tm.add_transform("world", target, target.world2loc)
             target.scene = self
 
-    def visualize(self, frame, ax):
-        scaling = 0.1
-        self.tm.plot_frames_in(frame, ax=ax, s=scaling)
-        ax.set_xlim((-0.25, 0.75))
-        ax.set_ylim((-0.5, 0.5))
-        ax.set_zlim((0.0, 1.0))
+    def visualize(self, frame, ax, coord_len: float=1):
+        self.tm.plot_frames_in(frame, ax=ax, s=coord_len)
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_zlabel('z')
