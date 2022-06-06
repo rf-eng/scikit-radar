@@ -1,9 +1,12 @@
+import pdb
+import warnings
 from abc import ABC, abstractmethod
 from pytransform3d.transformations import vector_to_point, transform
 from pytransform3d.transform_manager import TransformManager
 import pytransform3d.transformations as pt
 from pytransform3d.coordinates import spherical_from_cartesian
-from skradar import range_compress_FMCW
+from scipy.constants import speed_of_light as c0
+from skradar import range_compress_FMCW, sim_FMCW_if
 import numpy as np
 import matplotlib.pyplot as plt
 plt.ion()
@@ -31,8 +34,7 @@ class Thing:
 
     def __init__(self, name: str, pos: np.ndarray,
                  rotation: np.ndarray = np.eye(3),
-                 vel: np.ndarray = np.zeros((3, 1)),
-                 omega: np.ndarray = np.zeros((3, 1))):
+                 vel: np.ndarray = np.zeros((3, 1))):
         """
         Create a thing.
 
@@ -47,21 +49,46 @@ class Thing:
             Rotation matrix describing the orientation of the object.
             The default is np.eye(3).
         vel : np.ndarray, shape (3, 1)
-            Initial velocity vector. The default is np.zeros(3,1).
-        omega : np.ndarray, shape (3, 1)
-            Initial angular velocity vector. The default is np.zeros(3,1).
+            Velocity vector in world coordinates. The default is np.zeros(3,1).
         """
+        if not(pos.shape == (3, 1)):
+            warnings.warn(
+                f'Warning: Expected pos with shape (3,1) but got {pos.shape}.'+
+                ' Trying to reshape')
+            pos = pos.copy().reshape((3, 1))
         self.pos = pos
+        if not(vel.shape == (3, 1)):
+            warnings.warn(
+                f'Warning: Expected vel with shape (3,1) but got {vel.shape}.'+
+                ' Trying to reshape')
+            vel = vel.copy().reshape((3, 1))
+        self.vel = vel
+        self.rotation = rotation
         self.loc2world = pt.transform_from(
-            R=rotation, p=pos.ravel())  # homogeneous coordinates
+            R=self.rotation, p=pos.ravel())  # homogeneous coordinates
         self.world2loc = pt.invert_transform(self.loc2world)
         self.name = name
+        self.scene = None
 
-    def __str__(self):
+    def __str__(self):  # convenient for visualization
         if not(self.name is None) and len(self.name) > 0:
             return self.name
         else:
             return self.__repr__()
+        
+    def predict_pose(self, delta_t: float) -> tuple[np.ndarray, np.ndarray,
+                                                    np.ndarray]:
+        pos = self.pos + self.vel * delta_t
+        loc2world = pt.transform_from(
+            R=self.rotation, p=self.pos.ravel())  # homogeneous coordinates
+        world2loc = pt.invert_transform(self.loc2world)
+        return pos, loc2world, world2loc
+
+    def update_pose(self, delta_t: float):
+        pos, loc2world, world2loc = self.predict_pose(delta_t)
+        self.pos = pos
+        self.loc2world = loc2world
+        self.world2loc = world2loc
 
 
 class Target(Thing):
@@ -135,14 +162,63 @@ class Radar(Thing, ABC):
         self.targets = None
         super().__init__(**kwargs)
 
-    def assign_targets(self, targets: list[Target]):
+    @property
+    def M_tx(self):
+        return self.tx_pos.shape[1]
+
+    @property
+    def M_rx(self):
+        return self.rx_pos.shape[1]
+
+    @property
+    def N_targ(self):
+        return len(self.targets)
+
+    def set_targets(self, targets: list[Target]):
         self.targets = targets
 
-    def calc_target_locations(self):
-        for target in self.targets:
-            p_in_world = vector_to_point(target.pos)  # to homogeneous coords.
-            p_in_radar = transform(self.world2loc, p_in_world)
-            print(spherical_from_cartesian(p_in_radar[0:3]))
+    def calc_dists(self, delta_t: float = 0) -> np.ndarray:
+        """
+        Calculate the distances between all target(s) and TX as well as RX
+        antennas. The optional time parameter delta_t can be used to
+        calculate varying distances within a CPI. It is assumed that target and
+        radar velocities are constant over the CPI.
+
+        Parameters
+        ----------
+        delta_t : float, optional
+            Prediction time in seconds. Can, for example, be used to calculate
+            varying distances over a CPI.
+
+        Returns
+        -------
+        dists : np.ndarray, shape(M_tx, M_rx, N_targ)
+            Array containing all distances between TXs, RXs, and targets.
+
+        """
+        # np.sqrt(np.dot(vec, vec)) is faster than np.linalg.norm
+        # TODO: consider using scipy.spatial.distance_matrix
+        dists = np.empty((self.M_tx, self.M_rx, self.N_targ))
+        tx_dist = np.empty(self.M_tx)
+        rx_dist = np.empty(self.M_rx)
+        for targ_cntr, target in enumerate(self.targets):
+            # convert target position vector to homogeneous coordinates:
+            targ_pos = target.predict_pose(delta_t)[0]
+            p_in_world = vector_to_point(targ_pos.ravel())
+            # calculate vector from local origin to target
+            world2loc = self.predict_pose(delta_t)[2]
+            p_in_radar = transform(world2loc, p_in_world)
+            for tx_cntr in range(self.M_tx):  # calc. all distances tx <-> targ
+                tx_to_targ = p_in_radar[0:3] - self.tx_pos[:, tx_cntr]
+                tx_dist[tx_cntr] = np.sqrt(np.dot(tx_to_targ, tx_to_targ))
+            for rx_cntr in range(self.M_rx):  # calc. all distances rx <-> targ
+                rx_to_targ = p_in_radar[0:3] - self.rx_pos[:, rx_cntr]
+                rx_dist[rx_cntr] = np.sqrt(np.dot(rx_to_targ, rx_to_targ))
+            for tx_cntr in range(self.M_tx):
+                for rx_cntr in range(self.M_rx):  # all tx/rx combinations
+                    dists[tx_cntr, rx_cntr,
+                          targ_cntr] = tx_dist[tx_cntr]+rx_dist[rx_cntr]
+        return dists
 
     @abstractmethod
     def range_compression(self):
@@ -156,7 +232,7 @@ class Radar(Thing, ABC):
         """
         pass
 
-    def calc_radar_cube(self):
+    def process_radar_cube(self):
         self.range_compression(self)
         self.doppler_processing(self)
         self.mimo_processing(self)
@@ -176,21 +252,38 @@ class FMCWRadar(Radar):
             TODO.
     """
 
-    def __init__(self, B: float, fc: float, N: int, T_s: float, **kwargs):
+    def __init__(self, B: float, fc: float, N_f: int, N_s: int, T_f: float,
+                 T_s: float, **kwargs):
         self.B = B
         self.fc = fc
-        self.N = N
+        self.N_f = N_f
+        self.N_s = N_s
+        self.T_f = T_f
         self.T_s = T_s
         self.s_if = None
         super().__init__(**kwargs)
+        self.t_s = np.arange(N_s)*T_s  # slow time vec. (unif. chirp sequence)
 
-    def range_compression(self):
+    def sim_chirps(self):
+        self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
+        for chirp_cntr in range(self.N_s):
+            dists = self.calc_dists(chirp_cntr*self.T_s)
+            for tx_cntr in range(self.M_tx):
+                for rx_cntr in range(self.M_rx):
+                    for targ_cntr in range(self.N_targ):  # sum over targets
+                        dist = dists[tx_cntr, rx_cntr, targ_cntr]
+                        s_if_tmp = sim_FMCW_if(
+                            dist, self.B, self.fc, self.N_f, self.T_s)
+                        self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
+
+    def range_compression(self, zp_fact: int):
         if self.s_if is None:
             raise TypeError(
                 's_if is None. It has to be simulated or loaded first')
         else:
-            range_compress_FMCW(self.s_if, self.B, self.zp_fact, self.c,
-                                self.flatten_phase)
+            flatten_phase = True
+            self.rp, self.ranges = range_compress_FMCW(self.s_if, self.B, zp_fact,
+                                          self.scene.c, flatten_phase)
 
 
 class Scene:
@@ -208,7 +301,7 @@ class Scene:
             A list of Target objects.
     """
 
-    def __init__(self, radars: list, targets: list):
+    def __init__(self, radars: list, targets: list, c: float=c0):
         """
         
 
@@ -218,6 +311,8 @@ class Scene:
             List of radar objects.
         targets : list
             List of target objects.
+        c : float, optional
+            Propagation velocity in meters/second. Default is c0
 
         Returns
         -------
@@ -228,10 +323,14 @@ class Scene:
         self.radars = radars
         self.targets = targets
         self.tm = TransformManager()
+        self.c = c
         for radar in self.radars:
             self.tm.add_transform("world", radar, radar.world2loc)
+            radar.set_targets(targets)
+            radar.scene = self
         for target in self.targets:
             self.tm.add_transform("world", target, target.world2loc)
+            target.scene = self
 
     def visualize(self, frame, ax):
         scaling = 0.1
@@ -239,15 +338,21 @@ class Scene:
         ax.set_xlim((-0.25, 0.75))
         ax.set_ylim((-0.5, 0.5))
         ax.set_zlim((0.0, 1.0))
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_zlabel('z')
         plt.show()
 
 
 if __name__ == "__main__":
     B = 1e9
     fc = 76.5e9
-    N = 1024
-    f_s = 1e6
-    reference_pos = np.array([0, 0, 0.3])
+    N_f = 1024  # number of fast time samples
+    f_sf = 1e6  # fast time sampling rate
+    N_s = 1  # number of slow time samples
+    T_chirp = (N_f-1)*1/f_sf
+
+    reference_pos = np.array([[0], [0], [0.3]])
     TxPosn = np.array([[-139.425, -20.25, 16.0],
                        [-129.675, -20.25, 16.0],
                        [-119.925, -20.25, 16.0],
@@ -259,7 +364,7 @@ if __name__ == "__main__":
                        [110.175, -20.25, 16.0],
                        [119.925, -20.25, 16.0],
                        [129.675, -20.25, 16.0],
-                       [139.425, -20.25, 16.0]])*1e-3
+                       [139.425, -20.25, 16.0]]).T*1e-3
 
     RxPosn = np.array([[-62.4, 20.25, 16.0],
                        [-54.6, 20.25, 16.0],
@@ -276,17 +381,16 @@ if __name__ == "__main__":
                        [31.2, 20.25, 16.0],
                        [39.0, 20.25, 16.0],
                        [46.8, 20.25, 16.0],
-                       [54.6, 20.25, 16.0]])*1e-3
-    radar = FMCWRadar(B=B, fc=fc, N=N, T_s=1/f_s, tx_pos=TxPosn, rx_pos=RxPosn,
+                       [54.6, 20.25, 16.0]]).T*1e-3
+
+    radar = FMCWRadar(B=B, fc=fc, N_f=N_f, T_f=1/f_sf, T_s=1/T_chirp,
+                      N_s=N_s, tx_pos=TxPosn, rx_pos=RxPosn,
                       pos=reference_pos, name='First radar')
     target1 = Target(rcs=1, pos=np.array(
-        [0.2, 0.5, 0.5]), name='Small static target')
+        [[0.2], [0.5], [0.5]]), name='Small static target')
     target2 = Target(rcs=10, pos=np.array(
-        [0, 0, 0.7]), name='Big static target')
+        [[0], [0], [0.7]]), name='Big static target')
     scene = Scene([radar], [target1, target2])
-
-    radar.assign_targets([target1, target2])
-    radar.calc_target_locations()
 
     # Visualize scene
     fig = plt.figure(1)
@@ -304,3 +408,11 @@ if __name__ == "__main__":
     print(f'The point {p_in_world} in the world coordinate can be described as'
           f' {p_in_radar} in the coordinate system of the radar and as'
           f' {p_in_target1} in the coordinate system of target1.')
+
+    radar.sim_chirps()
+    radar.range_compression(zp_fact=4)
+    
+       
+    plt.figure(2)
+    plt.clf()    
+    plt.plot(radar.ranges/2, 20*np.log10(np.abs(radar.rp[0,0,0,:])))
