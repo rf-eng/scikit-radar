@@ -255,13 +255,14 @@ class FMCWRadar(Radar):
     """
 
     def __init__(self, B: float, fc: float, N_f: int, N_s: int, T_f: float,
-                 T_s: float, win_range: str='hann', **kwargs):
+                 T_s: float, win_range: str='hann', if_real: bool=True, **kwargs):
         self.B = B
         self.fc = fc
         self.N_f = N_f
         self.N_s = N_s
         self.T_f = T_f
         self.T_s = T_s
+        self.if_real = if_real
         self.s_if = None
         self.win_range = scipy.signal.windows.get_window(win_range, N_f)
         super().__init__(**kwargs)
@@ -279,15 +280,44 @@ class FMCWRadar(Radar):
                             dist, self.B, self.fc, self.N_f, self.T_s)
                         self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
 
-    def range_compression(self, zp_fact: int):
+    def range_compression(self, zp_fact: float):
+        """
+        Perform range compression and amplitude scaling on the previously simulated or measured intermediate frequency data.
+        
+        The amplitude scaling takes the number of samples and the coherent
+        window gain into account.
+
+        Parameters
+        ----------
+        zp_fact : float            
+            Zero-padding factor. The IF signal is zero-padded to
+            2**nextpow2(zp_fact*N) with N being the number of samples in s_if.
+
+        Raises
+        ------
+        TypeError
+            A TypeError is raised if no s_if is available from a previous
+            simulation or measurement.
+
+        Returns
+        -------
+        None.
+
+        """
         if self.s_if is None:
             raise TypeError(
                 's_if is None. It has to be simulated or loaded first')
         else:
-            flatten_phase = True
+            flatten_phase = True            
+            win_coh_gain = np.sum(self.win_range)/self.N_f
+            if self.if_real:
+                scale_to_amp = 2/(self.N_f*win_coh_gain)
+            else:
+                scale_to_amp = 1/(self.N_f*win_coh_gain)
             self.rp, self.ranges = range_compress_FMCW(
-                self.s_if*self.win_range, self.B, zp_fact,
+                self.s_if, self.win_range, self.B, zp_fact,
                 self.scene.c, flatten_phase)
+            self.rp = scale_to_amp*self.rp
 
 
 class Scene:
@@ -338,10 +368,6 @@ class Scene:
 
     def visualize(self, frame, ax, coord_len: float=1):
         self.tm.plot_frames_in(frame, ax=ax, s=coord_len)
-        ax.set_xlabel('x')
-        ax.set_ylabel('y')
-        ax.set_zlabel('z')
-        plt.show()
 
 
 if __name__ == "__main__":
@@ -412,7 +438,6 @@ if __name__ == "__main__":
     radar.sim_chirps()
     radar.range_compression(zp_fact=4)
     
-       
     plt.figure(2)
-    plt.clf()    
-    plt.plot(radar.ranges/2, 20*np.log10(np.abs(radar.rp[0,0,0,:])))
+    plt.clf()
+    plt.plot(radar.ranges/2, 20*np.log10(np.abs(radar.rp[0, 0, 0, :])))
