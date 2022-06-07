@@ -2,8 +2,9 @@ import numpy as np
 from scipy.constants import speed_of_light as c0
 from skradar import nextpow2
 
-def range_compress_FMCW(s_if: np.ndarray, B: float, zp_fact: float,
-                        c: float = c0,
+
+def range_compress_FMCW(s_if: np.ndarray, win_range: np.ndarray, B: float,
+                        zp_fact: float, c: float = c0,
                         flatten_phase: bool = True) -> tuple[np.ndarray, np.ndarray]:
     """
     Performs range-compression on the intermediate frequency (IF) data of an
@@ -15,6 +16,9 @@ def range_compress_FMCW(s_if: np.ndarray, B: float, zp_fact: float,
     s_if : np.ndarray
         The intermediate frequency (IF) data of an FMCW radar. The function 
         sim_FMCW_if can be used to simulate such a signal.
+    win_range : np.ndarray, shape(s_if.shape[-1])
+        Window function applied along fast-time to control the sidelobes in the
+        range profile.
     B : float
         Bandwidth in Hertz.
     zp_fact : float
@@ -45,6 +49,6 @@ def range_compress_FMCW(s_if: np.ndarray, B: float, zp_fact: float,
         phase_corr = np.exp(1j*2*np.pi*psi*(N-1)/2)
     else:
         phase_corr = 1
-    range_profile = np.fft.fft(s_if, z)*phase_corr
+    range_profile = np.fft.fft(s_if*win_range, z)*phase_corr
     ranges = np.linspace(0, 1-1/z, z)*(N-1)*c/B
     return range_profile, ranges
