@@ -90,6 +90,7 @@ class Thing:
         self.pos = pos
         self.loc2world = loc2world
         self.world2loc = world2loc
+        self.scene.tm.add_transform("world", self, self.world2loc)
 
 
 class Target(Thing):
