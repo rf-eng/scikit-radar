@@ -161,6 +161,7 @@ class Radar(Thing, ABC):
         self.tx_pos = tx_pos
         self.rx_pos = rx_pos
         self.targets = None
+        self.rp = None
         super().__init__(**kwargs)
 
     @property
@@ -233,6 +234,22 @@ class Radar(Thing, ABC):
 
         """
         pass
+    
+    def merge_mimo(self):
+        raise NotImplementedError('Function not implemented yet')
+                
+    def extract_mimo(self):
+        raise NotImplementedError('Function not implemented yet')
+    
+    def angle_proc_RX_DFT(self, zp_fact: float):
+        if self.rp is None:
+            raise TypeError(
+                'rp is None. It has to be calculated first')
+        else:
+            # check for uniform RX antenna spacing
+            pass
+            
+        
 
     def process_radar_cube(self):
         self.range_compression(self)
