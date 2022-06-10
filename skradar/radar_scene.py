@@ -158,8 +158,18 @@ class Radar(Thing, ABC):
         None.
 
         """
-        self.tx_pos = tx_pos
-        self.rx_pos = rx_pos
+        if tx_pos.ndim != 2:
+            raise ValueError(f'Expected two-dimensional tx_pos but got {tx_pos.ndim}.')
+        elif tx_pos.shape[0] != 3:
+            raise ValueError(f'Expected tx_pos with 3 rows but got {tx_pos.shape[0]}.')
+        else:
+            self.tx_pos = tx_pos
+        if rx_pos.ndim != 2:
+            raise ValueError(f'Expected two-dimensional rx_pos but got {rx_pos.ndim}.')
+        elif rx_pos.shape[0] != 3:
+            raise ValueError(f'Expected rx_pos with 3 rows but got {rx_pos.shape[0]}.')
+        else:
+            self.rx_pos = rx_pos
         self.targets = None
         self.rp = None
         super().__init__(**kwargs)
