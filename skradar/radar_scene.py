@@ -7,6 +7,7 @@ import pytransform3d.transformations as pt
 from pytransform3d.coordinates import spherical_from_cartesian
 from scipy.constants import speed_of_light as c0
 from skradar import range_compress_FMCW, sim_FMCW_if
+from skradar import nextpow2
 import numpy as np
 import scipy.signal
 import matplotlib.pyplot as plt
@@ -160,7 +161,8 @@ class Radar(Thing, ABC):
 
         """
         if tx_pos.ndim != 2:
-            raise ValueError(f'Expected two-dimensional tx_pos but got {tx_pos.ndim}.')
+            raise ValueError(
+                f'Expected two-dimensional tx_pos but got {tx_pos.ndim}.')
         elif tx_pos.shape[0] != 3:
             raise ValueError(f'Expected tx_pos with 3 rows but got {tx_pos.shape[0]}.')
         else:
@@ -252,13 +254,44 @@ class Radar(Thing, ABC):
     def extract_mimo(self):
         raise NotImplementedError('Function not implemented yet')
     
-    def angle_proc_RX_DFT(self, zp_fact: float):
+    def angle_proc_RX_DFT(self, zp_fact: float = 1, win_rx: str = 'boxcar'):
+        """
+        Calculate angle-FFT along the RX antennas for all range-profile samples.
+
+        Parameters
+        ----------
+        zp_fact : float, optional
+            Zero-padding factor
+        win_rx : str, optional
+            Window function used for RX-only beamforming. Default is 'boxcar'.
+
+        Returns
+        -------
+        None.
+
+        """
         if self.rp is None:
             raise TypeError(
                 'rp is None. It has to be calculated first')
+        elif self.M_rx < 2:
+            warnings.warn(f"Warning: Angle processing doesn't make sense for " +
+                          "only one antenna. Doing nothing.")
         else:
-            # check for uniform RX antenna spacing
-            pass
+            # TODO: Check if antennas are on a line
+            # TODO: Check if spacing is uniform
+            win_rx = scipy.signal.windows.get_window(win_rx, self.M_rx)
+            win = win_rx[:, np.newaxis, np.newaxis]
+            z = 2**nextpow2(zp_fact*self.M_rx)
+            win_coh_gain = np.sum(win_rx)/self.M_rx
+            scale_to_amp = 1/(self.M_rx*win_coh_gain)
+            self.ra = scale_to_amp*np.fft.fft(self.rp*win, n=z, axis=-3)
+            self.ra = np.fft.fftshift(self.ra, axes=-3)
+            u_vec = 2*np.fft.fftshift(np.fft.fftfreq(z))
+            self.angles = np.arcsin(u_vec)
+
+    def angle_proc_DFT(self):
+        self.extract_mimo()
+        raise NotImplementedError('Function not implemented yet')
             
         
 
