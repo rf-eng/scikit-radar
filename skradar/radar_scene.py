@@ -10,6 +10,7 @@ from skradar import range_compress_FMCW, sim_FMCW_if
 from skradar import nextpow2
 import numpy as np
 import scipy.signal
+import scipy.spatial
 import matplotlib.pyplot as plt
 plt.ion()
 
@@ -174,7 +175,7 @@ class Radar(Thing, ABC):
         else:
             self.rx_pos = rx_pos
         self.targets = None
-        self.rp = None
+        self.rp = None  # range profile
         super().__init__(**kwargs)
 
     @property
@@ -188,6 +189,10 @@ class Radar(Thing, ABC):
     @property
     def N_targ(self):
         return len(self.targets)
+
+    @property
+    def kw(self):
+        return 2*np.pi*self.fc/self.scene.c
 
     def set_targets(self, targets: list[Target]):
         self.targets = targets
@@ -253,7 +258,70 @@ class Radar(Thing, ABC):
                 
     def extract_mimo(self):
         raise NotImplementedError('Function not implemented yet')
-    
+
+    def angle_proc_bp(self, ranges_bp: np.ndarray, angles_bp: np.ndarray):
+        # ranges_bp contains distances to image pixels (not round-trip)
+        if self.rp is None:
+            raise TypeError(
+                'rp is None. It has to be calculated first')
+        elif self.M_rx < 2 and self.M_tx < 2:
+            warnings.warn("Warning: Angle processing doesn't make sense for " +
+                          "only one antenna. Doing nothing.")
+        elif 2*(np.max(ranges_bp)) > np.max(self.ranges):
+            # Definitely too large, even for a monostatic configuration
+            raise ValueError('Image size too large: Range profile does not ' +
+                             'cover the largest distance TX->pixel->RX.')
+        else:
+            self.ranges_bp = ranges_bp
+            num_ranges = self.ranges_bp.shape[0]
+            self.angles_bp = angles_bp
+            num_angles = self.angles_bp.shape[0]
+            # all range-angle combinations:
+            r_mat, ang_mat = np.meshgrid(self.ranges_bp, self.angles_bp)
+            x_mat = r_mat*np.sin(ang_mat)
+            y_mat = np.zeros_like(x_mat)
+            z_mat = r_mat*np.cos(ang_mat)
+            pixel_coord = np.block(
+                [[x_mat.ravel()], [y_mat.ravel()], [z_mat.ravel()]])
+            # calculate distance matrix from each tx to each image pixel:
+            pathlens_tx = scipy.spatial.distance_matrix(
+                pixel_coord.T, self.tx_pos.T)
+            # calculate distance matrix from each rx to each image pixel:
+            pathlens_rx = scipy.spatial.distance_matrix(
+                pixel_coord.T, self.rx_pos.T)
+            if np.max(pathlens_tx)+np.max(pathlens_rx) > np.max(self.ranges):
+                raise ValueError('Image size too large: Range profile does not ' +
+                                 'cover the largest distance TX->pixel->RX.')
+
+            # all combinations of TX-, RX-, and pixel-indices
+            tx_idcs_mat, rx_idcs_mat, px_idcs_mat = np.mgrid[0:self.M_tx,
+                                                             0:self.M_rx,
+                                                             0:num_ranges*num_angles]
+            tx_idcs = tx_idcs_mat.ravel()
+            rx_idcs = rx_idcs_mat.ravel()
+            px_idcs = px_idcs_mat.ravel()
+
+            # calculate round-trip times tx->pixel->rx
+            pathlens = pathlens_tx[px_idcs, tx_idcs] + \
+                pathlens_rx[px_idcs, rx_idcs]
+
+            # Find indices for range profile (nearest neighbor)
+            delta_r = self.ranges[1] - self.ranges[0]
+            pathlen_idcs = np.rint(pathlens/delta_r).astype(int)
+
+            rp_vals = self.rp[tx_idcs, rx_idcs, :,
+                              pathlen_idcs].astype(np.complex64)
+            phase_corr = np.exp(-1j*self.kw*pathlens).astype(np.complex64)
+            rp_corr = rp_vals*phase_corr[:, np.newaxis]  # newaxis to support multiple chirps
+            # unravel
+            rp_tmp = rp_corr.reshape(
+                (self.M_tx, self.M_rx, -1, num_ranges*num_angles))
+            # sum over antennas for each pixel and unravel to image
+            self.ra_bp = np.sum(rp_tmp, axis=(0, 1)).reshape(
+                (num_angles, num_ranges))  # inverse indexing since meshgrid is different from mgrid
+            scale_to_amp = 1 / (self.M_rx * self.M_tx)
+            self.ra_bp = scale_to_amp * self.ra_bp
+
     def angle_proc_RX_DFT(self, zp_fact: float = 1, win_rx: str = 'boxcar'):
         """
         Calculate angle-FFT along the RX antennas for all range-profile samples.
@@ -434,7 +502,7 @@ class Scene:
 if __name__ == "__main__":
     B = 1e9
     fc = 76.5e9
-    N_f = 1024  # number of fast time samples
+    N_f = 128  # number of fast time samples
     f_sf = 1e6  # fast time sampling rate
     N_s = 1  # number of slow time samples
     T_chirp = (N_f-1)*1/f_sf
@@ -502,3 +570,7 @@ if __name__ == "__main__":
     plt.figure(2)
     plt.clf()
     plt.plot(radar.ranges/2, 20*np.log10(np.abs(radar.rp[0, 0, 0, :])))
+
+    delta_r = radar.ranges[1] - radar.ranges[0]
+    ranges_bp = np.arange(start=0, stop=5, step=delta_r)
+    radar.angle_proc_bp(ranges_bp, np.linspace(-np.pi/2, np.pi/2, 20))
