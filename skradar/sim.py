@@ -1,5 +1,7 @@
 import numpy as np
+from numpy.random import default_rng
 from scipy.constants import speed_of_light as c0
+from scipy.constants import Boltzmann as kb
 
 
 def sim_FMCW_if(r: float, B: float, fc: float, N: float, Ts: float,
@@ -50,3 +52,39 @@ def sim_FMCW_if(r: float, B: float, fc: float, N: float, Ts: float,
     else:
         s_if = np.cos(2*np.pi*(fc*tau+k_ramp*tau*t))
     return s_if
+
+
+def AWGN(N: int, fs: float, T: float = 290, seed: int = None, cplx: bool = False) -> np.ndarray:
+    """Generates samples of either real- or complex-valued white Gaussian noise.
+
+    The noise power density is calculated from kb*t using Boltzmann's constant kb. The equivalent
+    noise bandwidth is always set to fs/2, also if complex-valued noise is generated.
+
+    Parameters
+    ----------
+    N : int
+        Number of samples.
+    fs : float
+        Sampling rate in Hz.
+    T : float, optional
+        Equivalent noise temperature in Kelvin, by default 290 K
+    seed : int, optional
+        Seed for the random number generator, by default None
+    cplx : bool, optional
+        Generate complex-valued noise, by default False
+
+    Returns
+    -------
+    np.ndarray
+        Noise samples
+    """
+    rng = default_rng(seed)
+    p_noise = kb * T * fs / 2  # noise power in ADC bandwidth
+    if cplx:
+        noise = np.sqrt(p_noise) * (rng.standard_normal(N) +
+                                    1j * rng.standard_normal(N))
+    else:
+        noise = np.sqrt(p_noise) * rng.standard_normal(N)
+    return noise
+
+
