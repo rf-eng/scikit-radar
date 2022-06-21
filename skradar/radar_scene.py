@@ -21,7 +21,7 @@ class Thing:
 
     Both location and orientation might change over time for non-zero
     velocities
-    
+
     Attributes
     ----------
         pos:
@@ -56,13 +56,13 @@ class Thing:
         """
         if not(pos.shape == (3, 1)):
             warnings.warn(
-                f'Warning: Expected pos with shape (3,1) but got {pos.shape}.'+
+                f'Warning: Expected pos with shape (3,1) but got {pos.shape}.' +
                 ' Trying to reshape')
             pos = pos.copy().reshape((3, 1))
         self.pos = pos
         if not(vel.shape == (3, 1)):
             warnings.warn(
-                f'Warning: Expected vel with shape (3,1) but got {vel.shape}.'+
+                f'Warning: Expected vel with shape (3,1) but got {vel.shape}.' +
                 ' Trying to reshape')
             vel = vel.copy().reshape((3, 1))
         self.vel = vel
@@ -78,7 +78,7 @@ class Thing:
             return self.name
         else:
             return self.__repr__()
-        
+
     def predict_pose(self, delta_t: float) -> tuple[np.ndarray, np.ndarray,
                                                     np.ndarray]:
         pos = self.pos + self.vel * delta_t
@@ -101,7 +101,7 @@ class Target(Thing):
 
     A target has a radar cross section (in addition to the position and
     orientation information)
-    
+
     Attributes
     ----------
         rcs:
@@ -133,7 +133,7 @@ class Radar(Thing, ABC):
 
     The generic radar only allows to determine relative ranges and angles
     between the radar antennas and (several) target(s)
-    
+
     Attributes
     ----------
         tx_pos : np.ndarray, shape(3, M_tx)
@@ -165,13 +165,16 @@ class Radar(Thing, ABC):
             raise ValueError(
                 f'Expected two-dimensional tx_pos but got {tx_pos.ndim}.')
         elif tx_pos.shape[0] != 3:
-            raise ValueError(f'Expected tx_pos with 3 rows but got {tx_pos.shape[0]}.')
+            raise ValueError(
+                f'Expected tx_pos with 3 rows but got {tx_pos.shape[0]}.')
         else:
             self.tx_pos = tx_pos
         if rx_pos.ndim != 2:
-            raise ValueError(f'Expected two-dimensional rx_pos but got {rx_pos.ndim}.')
+            raise ValueError(
+                f'Expected two-dimensional rx_pos but got {rx_pos.ndim}.')
         elif rx_pos.shape[0] != 3:
-            raise ValueError(f'Expected rx_pos with 3 rows but got {rx_pos.shape[0]}.')
+            raise ValueError(
+                f'Expected rx_pos with 3 rows but got {rx_pos.shape[0]}.')
         else:
             self.rx_pos = rx_pos
         self.targets = None
@@ -192,7 +195,7 @@ class Radar(Thing, ABC):
 
     @property
     def kw(self):
-        return 2*np.pi*self.fc/self.scene.c
+        return 2 * np.pi * self.fc / self.scene.c
 
     def set_targets(self, targets: list[Target]):
         self.targets = targets
@@ -200,7 +203,7 @@ class Radar(Thing, ABC):
     def calc_dists(self, delta_t: float = 0) -> np.ndarray:
         """
         Calculate the distances between all target(s) and TX as well as RX antennas.
-        
+
         The optional time parameter delta_t can be used to
         calculate varying distances within a CPI. It is assumed that target and
         radar velocities are constant over the CPI.
@@ -238,7 +241,7 @@ class Radar(Thing, ABC):
             for tx_cntr in range(self.M_tx):
                 for rx_cntr in range(self.M_rx):  # all tx/rx combinations
                     dists[tx_cntr, rx_cntr,
-                          targ_cntr] = tx_dist[tx_cntr]+rx_dist[rx_cntr]
+                          targ_cntr] = tx_dist[tx_cntr] + rx_dist[rx_cntr]
         return dists
 
     @abstractmethod
@@ -252,10 +255,10 @@ class Radar(Thing, ABC):
 
         """
         pass
-    
+
     def merge_mimo(self):
         raise NotImplementedError('Function not implemented yet')
-                
+
     def extract_mimo(self):
         raise NotImplementedError('Function not implemented yet')
 
@@ -267,7 +270,7 @@ class Radar(Thing, ABC):
         elif self.M_rx < 2 and self.M_tx < 2:
             warnings.warn("Warning: Angle processing doesn't make sense for " +
                           "only one antenna. Doing nothing.")
-        elif 2*(np.max(ranges_bp)) > np.max(self.ranges):
+        elif 2 * (np.max(ranges_bp)) > np.max(self.ranges):
             # Definitely too large, even for a monostatic configuration
             raise ValueError('Image size too large: Range profile does not ' +
                              'cover the largest distance TX->pixel->RX.')
@@ -278,9 +281,9 @@ class Radar(Thing, ABC):
             num_angles = self.angles_bp.shape[0]
             # all range-angle combinations:
             r_mat, ang_mat = np.meshgrid(self.ranges_bp, self.angles_bp)
-            x_mat = r_mat*np.sin(ang_mat)
+            x_mat = r_mat * np.sin(ang_mat)
             y_mat = np.zeros_like(x_mat)
-            z_mat = r_mat*np.cos(ang_mat)
+            z_mat = r_mat * np.cos(ang_mat)
             pixel_coord = np.block(
                 [[x_mat.ravel()], [y_mat.ravel()], [z_mat.ravel()]])
             # calculate distance matrix from each tx to each image pixel:
@@ -289,14 +292,14 @@ class Radar(Thing, ABC):
             # calculate distance matrix from each rx to each image pixel:
             pathlens_rx = scipy.spatial.distance_matrix(
                 pixel_coord.T, self.rx_pos.T)
-            if np.max(pathlens_tx)+np.max(pathlens_rx) > np.max(self.ranges):
+            if np.max(pathlens_tx) + np.max(pathlens_rx) > np.max(self.ranges):
                 raise ValueError('Image size too large: Range profile does not ' +
                                  'cover the largest distance TX->pixel->RX.')
 
             # all combinations of TX-, RX-, and pixel-indices
             tx_idcs_mat, rx_idcs_mat, px_idcs_mat = np.mgrid[0:self.M_tx,
                                                              0:self.M_rx,
-                                                             0:num_ranges*num_angles]
+                                                             0:num_ranges * num_angles]
             tx_idcs = tx_idcs_mat.ravel()
             rx_idcs = rx_idcs_mat.ravel()
             px_idcs = px_idcs_mat.ravel()
@@ -307,15 +310,16 @@ class Radar(Thing, ABC):
 
             # Find indices for range profile (nearest neighbor)
             delta_r = self.ranges[1] - self.ranges[0]
-            pathlen_idcs = np.rint(pathlens/delta_r).astype(int)
+            pathlen_idcs = np.rint(pathlens / delta_r).astype(int)
 
             rp_vals = self.rp[tx_idcs, rx_idcs, :,
                               pathlen_idcs].astype(np.complex64)
-            phase_corr = np.exp(-1j*self.kw*pathlens).astype(np.complex64)
-            rp_corr = rp_vals*phase_corr[:, np.newaxis]  # newaxis to support multiple chirps
+            phase_corr = np.exp(-1j * self.kw * pathlens).astype(np.complex64)
+            # newaxis to support multiple chirps
+            rp_corr = rp_vals * phase_corr[:, np.newaxis]
             # unravel
             rp_tmp = rp_corr.reshape(
-                (self.M_tx, self.M_rx, -1, num_ranges*num_angles))
+                (self.M_tx, self.M_rx, -1, num_ranges * num_angles))
             # sum over antennas for each pixel and unravel to image
             self.ra_bp = np.sum(rp_tmp, axis=(0, 1)).reshape(
                 (num_angles, num_ranges))  # inverse indexing since meshgrid is different from mgrid
@@ -349,19 +353,17 @@ class Radar(Thing, ABC):
             # TODO: Check if spacing is uniform
             win_rx = scipy.signal.windows.get_window(win_rx, self.M_rx)
             win = win_rx[:, np.newaxis, np.newaxis]
-            z = 2**nextpow2(zp_fact*self.M_rx)
-            win_coh_gain = np.sum(win_rx)/self.M_rx
-            scale_to_amp = 1/(self.M_rx*win_coh_gain)
-            self.ra = scale_to_amp*np.fft.fft(self.rp*win, n=z, axis=-3)
+            z = 2**nextpow2(zp_fact * self.M_rx)
+            win_coh_gain = np.sum(win_rx) / self.M_rx
+            scale_to_amp = 1 / (self.M_rx * win_coh_gain)
+            self.ra = scale_to_amp * np.fft.fft(self.rp * win, n=z, axis=-3)
             self.ra = np.fft.fftshift(self.ra, axes=-3)
-            u_vec = 2*np.fft.fftshift(np.fft.fftfreq(z))
+            u_vec = 2 * np.fft.fftshift(np.fft.fftfreq(z))
             self.angles = np.arcsin(u_vec)
 
     def angle_proc_DFT(self):
         self.extract_mimo()
         raise NotImplementedError('Function not implemented yet')
-            
-        
 
     def process_radar_cube(self):
         self.range_compression(self)
@@ -376,7 +378,7 @@ class FMCWRadar(Radar):
 
     The FMCW radar has to be configured with some radar settings and allows
     to simulate actual radar signals.
-    
+
     Attributes
     ----------
         TODO:
@@ -384,7 +386,7 @@ class FMCWRadar(Radar):
     """
 
     def __init__(self, B: float, fc: float, N_f: int, N_s: int, T_f: float,
-                 T_s: float, win_range: str='hann', if_real: bool=True, **kwargs):
+                 T_s: float, win_range: str = 'hann', if_real: bool = True, **kwargs):
         self.B = B
         self.fc = fc
         self.N_f = N_f
@@ -395,12 +397,13 @@ class FMCWRadar(Radar):
         self.s_if = None
         self.win_range = scipy.signal.windows.get_window(win_range, N_f)
         super().__init__(**kwargs)
-        self.t_s = np.arange(N_s)*T_s  # slow time vec. (unif. chirp sequence)
+        # slow time vec. (unif. chirp sequence)
+        self.t_s = np.arange(N_s) * T_s
 
     def sim_chirps(self):
         self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
         for chirp_cntr in range(self.N_s):
-            dists = self.calc_dists(chirp_cntr*self.T_s)
+            dists = self.calc_dists(chirp_cntr * self.T_s)
             for tx_cntr in range(self.M_tx):
                 for rx_cntr in range(self.M_rx):
                     for targ_cntr in range(self.N_targ):  # sum over targets
@@ -412,7 +415,7 @@ class FMCWRadar(Radar):
     def range_compression(self, zp_fact: float):
         """
         Perform range compression and amplitude scaling on the previously simulated or measured intermediate frequency data.
-        
+
         The amplitude scaling takes the number of samples and the coherent
         window gain into account.
 
@@ -437,16 +440,16 @@ class FMCWRadar(Radar):
             raise TypeError(
                 's_if is None. It has to be simulated or loaded first')
         else:
-            flatten_phase = True            
-            win_coh_gain = np.sum(self.win_range)/self.N_f
+            flatten_phase = True
+            win_coh_gain = np.sum(self.win_range) / self.N_f
             if self.if_real:
-                scale_to_amp = 2/(self.N_f*win_coh_gain)
+                scale_to_amp = 2 / (self.N_f * win_coh_gain)
             else:
-                scale_to_amp = 1/(self.N_f*win_coh_gain)
+                scale_to_amp = 1 / (self.N_f * win_coh_gain)
             self.rp, self.ranges = range_compress_FMCW(
                 self.s_if, self.win_range, self.B, zp_fact,
                 self.scene.c, flatten_phase)
-            self.rp = scale_to_amp*self.rp
+            self.rp = scale_to_amp * self.rp
 
 
 class Scene:
@@ -455,7 +458,7 @@ class Scene:
 
     The scene can include several radars and targets at different positions and
     with different orientations.
-    
+
     Attributes
     ----------
         radars: list
@@ -464,9 +467,9 @@ class Scene:
             A list of Target objects.
     """
 
-    def __init__(self, radars: list, targets: list, c: float=c0):
+    def __init__(self, radars: list, targets: list, c: float = c0):
         """
-        
+
 
         Parameters
         ----------
@@ -495,7 +498,7 @@ class Scene:
             self.tm.add_transform("world", target, target.world2loc)
             target.scene = self
 
-    def visualize(self, frame, ax, coord_len: float=1):
+    def visualize(self, frame, ax, coord_len: float = 1):
         self.tm.plot_frames_in(frame, ax=ax, s=coord_len)
 
 
@@ -505,7 +508,7 @@ if __name__ == "__main__":
     N_f = 128  # number of fast time samples
     f_sf = 1e6  # fast time sampling rate
     N_s = 1  # number of slow time samples
-    T_chirp = (N_f-1)*1/f_sf
+    T_chirp = (N_f - 1) * 1 / f_sf
 
     reference_pos = np.array([[0], [0], [0.3]])
     TxPosn = np.array([[-139.425, -20.25, 16.0],
@@ -519,7 +522,7 @@ if __name__ == "__main__":
                        [110.175, -20.25, 16.0],
                        [119.925, -20.25, 16.0],
                        [129.675, -20.25, 16.0],
-                       [139.425, -20.25, 16.0]]).T*1e-3
+                       [139.425, -20.25, 16.0]]).T * 1e-3
 
     RxPosn = np.array([[-62.4, 20.25, 16.0],
                        [-54.6, 20.25, 16.0],
@@ -536,9 +539,9 @@ if __name__ == "__main__":
                        [31.2, 20.25, 16.0],
                        [39.0, 20.25, 16.0],
                        [46.8, 20.25, 16.0],
-                       [54.6, 20.25, 16.0]]).T*1e-3
+                       [54.6, 20.25, 16.0]]).T * 1e-3
 
-    radar = FMCWRadar(B=B, fc=fc, N_f=N_f, T_f=1/f_sf, T_s=1/T_chirp,
+    radar = FMCWRadar(B=B, fc=fc, N_f=N_f, T_f=1 / f_sf, T_s=1 / T_chirp,
                       N_s=N_s, tx_pos=TxPosn, rx_pos=RxPosn,
                       pos=reference_pos, name='First radar')
     target1 = Target(rcs=1, pos=np.array(
@@ -566,11 +569,11 @@ if __name__ == "__main__":
 
     radar.sim_chirps()
     radar.range_compression(zp_fact=4)
-    
+
     plt.figure(2)
     plt.clf()
-    plt.plot(radar.ranges/2, 20*np.log10(np.abs(radar.rp[0, 0, 0, :])))
+    plt.plot(radar.ranges / 2, 20 * np.log10(np.abs(radar.rp[0, 0, 0, :])))
 
     delta_r = radar.ranges[1] - radar.ranges[0]
     ranges_bp = np.arange(start=0, stop=5, step=delta_r)
-    radar.angle_proc_bp(ranges_bp, np.linspace(-np.pi/2, np.pi/2, 20))
+    radar.angle_proc_bp(ranges_bp, np.linspace(-np.pi / 2, np.pi / 2, 20))

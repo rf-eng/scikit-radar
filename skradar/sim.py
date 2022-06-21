@@ -10,7 +10,7 @@ def sim_FMCW_if(r: float, B: float, fc: float, N: float, Ts: float,
     """
     This function simulates the intermediate frequency (IF) signal of a
     single-chirp of an FMCW radar.
-    
+
     Important notes:
         * It is assumed that the chirp duration :math:`T = (N-1)T_s`.
         * Range and velocity have to be entered as round-trip values!
@@ -43,14 +43,14 @@ def sim_FMCW_if(r: float, B: float, fc: float, N: float, Ts: float,
 
     """
     n = np.arange(N)
-    t = n*Ts
+    t = n * Ts
     T = t[-1]
-    k_ramp = B/T
-    tau = (r+v*t)/c  # round-trip time
+    k_ramp = B / T
+    tau = (r + v * t) / c  # round-trip time
     if cplx:
-        s_if = np.exp(1j*2*np.pi*(fc*tau+k_ramp*tau*t))
+        s_if = np.exp(1j * 2 * np.pi * (fc * tau + k_ramp * tau * t))
     else:
-        s_if = np.cos(2*np.pi*(fc*tau+k_ramp*tau*t))
+        s_if = np.cos(2 * np.pi * (fc * tau + k_ramp * tau * t))
     return s_if
 
 
@@ -122,6 +122,6 @@ def radar_eq(r_tx: float, r_rx: float, rcs: float, lambd: float,
     s2 = p_refl / (4 * np.pi * r_rx**2)
     # effective area of receive antenna:
     a_eff = G_rx * lambd**2 / (4 * np.pi)
-    # received power
+    # received power:
     p_rx = s2 * a_eff
     return p_rx

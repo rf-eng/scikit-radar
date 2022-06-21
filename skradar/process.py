@@ -38,17 +38,17 @@ def range_compress_FMCW(s_if: np.ndarray, win_range: np.ndarray, B: float,
         of the zero-padded and windowed s_if.
     ranges : np.ndarray
         Round trip ranges for each entry of the range profile(s).
-        
+
     """
     N = s_if.shape[-1]
-    z = 2**nextpow2(zp_fact*N)
+    z = 2**nextpow2(zp_fact * N)
     psi = np.fft.fftfreq(z)  # frequency normalized to sampling rate
     if flatten_phase:
         # make (non-zeropadded) time-domain signal symmetric to
         # remove linear phase
-        phase_corr = np.exp(1j*2*np.pi*psi*(N-1)/2)
+        phase_corr = np.exp(1j * 2 * np.pi * psi * (N - 1) / 2)
     else:
         phase_corr = 1
-    range_profile = np.fft.fft(s_if*win_range, z)*phase_corr
-    ranges = np.linspace(0, 1-1/z, z)*(N-1)*c/B
+    range_profile = np.fft.fft(s_if * win_range, z) * phase_corr
+    ranges = np.linspace(0, 1 - 1 / z, z) * (N - 1) * c / B
     return range_profile, ranges
