@@ -88,3 +88,40 @@ def AWGN(N: int, fs: float, T: float = 290, seed: int = None, cplx: bool = False
     return noise
 
 
+def radar_eq(r_tx: float, r_rx: float, rcs: float, lambd: float,
+             P_tx: float = 1e-3, G_tx: float = 1, G_rx: float = 1) -> float:
+    """Calculates the power at a receiver according to the radar equation.
+
+    Parameters
+    ----------
+    r_tx : float
+        Distance between transmitter and target in meters.
+    r_rx : float
+        Distance between receiver and target in meters.
+    rcs : float
+        Radar cross section of the target in m**2.
+    lambd : float
+        Wavelength in meters.
+    P_tx : float, optional
+        Transmitter power at the input of the TX antenna in Watts, by default 1e-3 W
+    G_tx : float, optional
+        Gain of the transmitting antenna (ratio, i.e. not in dBi), by default 1
+    G_rx : float, optional
+        Gain of the receiving antenna (ratio, i.e. not in dBi), by default 1
+
+    Returns
+    -------
+    float
+        Power at the output of the receiving antenna.
+    """
+    # power density at target:
+    s1 = P_tx * G_tx / (4 * np.pi * r_tx**2)
+    # reflected power:
+    p_refl = s1 * rcs
+    # power density at receiver:
+    s2 = p_refl / (4 * np.pi * r_rx**2)
+    # effective area of receive antenna:
+    a_eff = G_rx * lambd**2 / (4 * np.pi)
+    # received power
+    p_rx = s2 * a_eff
+    return p_rx
