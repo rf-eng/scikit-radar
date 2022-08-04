@@ -498,6 +498,21 @@ class Scene:
             self.tm.add_transform("world", target, target.world2loc)
             target.scene = self
 
+    def update_poses(self, delta_t: float):
+        """
+        Use current velocities and angular velocities to calculate and
+        set new poses for delta_t after the current time.
+
+        Parameters
+        ----------
+        delta_t : float
+            Time step in seconds.
+        """
+        for radar in self.radars:
+            radar.update_pose(delta_t)
+        for target in self.targets:
+            target.update_pose(delta_t)
+
     def visualize(self, frame, ax, coord_len: float = 1):
         self.tm.plot_frames_in(frame, ax=ax, s=coord_len)
 
