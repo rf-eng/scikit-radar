@@ -319,8 +319,9 @@ class Radar(Thing, ABC):
             delta_r = self.ranges[1] - self.ranges[0]
             pathlen_idcs = np.rint(pathlens / delta_r).astype(int)
 
-            rp_vals = self.rp[tx_idcs, rx_idcs, :,
+            rp_vals = self.rp[tx_idcs, rx_idcs, 0,
                               pathlen_idcs].astype(np.complex64)
+            rp_vals = rp_vals.reshape(len(rp_vals),1)
             phase_corr = np.exp(-1j * self.kw * pathlens).astype(np.complex64)
             # newaxis to support multiple chirps
             rp_corr = rp_vals * phase_corr[:, np.newaxis]
