@@ -83,8 +83,8 @@ class Thing:
                                                     np.ndarray]:
         pos = self.pos + self.vel * delta_t
         loc2world = pt.transform_from(
-            R=self.rotation, p=self.pos.ravel())  # homogeneous coordinates
-        world2loc = pt.invert_transform(self.loc2world)
+            R=self.rotation, p=pos.ravel())  # homogeneous coordinates
+        world2loc = pt.invert_transform(loc2world)
         return pos, loc2world, world2loc
 
     def update_pose(self, delta_t: float):
@@ -142,7 +142,7 @@ class Radar(Thing, ABC):
             Local 3-d Cartesian coordinate(s) of the M_rx RX antenna(s) in meters.
     """
 
-    def __init__(self, tx_pos: np.ndarray, rx_pos: np.ndarray, **kwargs):
+    def __init__(self, tx_pos: np.ndarray, rx_pos: np.ndarray, N_s: int, T_s: float, **kwargs):
         """
         Create a radar object.
 
@@ -152,6 +152,10 @@ class Radar(Thing, ABC):
             Local 3-d Cartesian coordinate(s) of the M_tx TX antenna(s) in meters.
         rx_pos : np.ndarray, shape(3, M_rx)
             Local 3-d Cartesian coordinate(s) of the M_rx RX antenna(s) in meters.
+        N_s : int
+            Number of slow time samples.
+        T_s : float
+            Slow time sampling interval in seconds.
         **kwargs : optional
             Remaining keyword arguments are passed to constructor of the
             Thing class.
@@ -179,6 +183,9 @@ class Radar(Thing, ABC):
             self.rx_pos = rx_pos
         self.targets = None
         self.rp = None  # range profile
+        
+        # slow time vec. (unif. chirp sequence)
+        self.t_s = np.arange(N_s) * T_s
         super().__init__(**kwargs)
 
     @property
@@ -247,7 +254,7 @@ class Radar(Thing, ABC):
     @abstractmethod
     def range_compression(self):
         """
-        Needs to be implemented in subclass.
+        Needs to be implemented in subclass since it depends on the type of radar modulation.
 
         Returns
         -------
@@ -365,6 +372,30 @@ class Radar(Thing, ABC):
         self.extract_mimo()
         raise NotImplementedError('Function not implemented yet')
 
+    def doppler_processing(self, zp_fact: float = 1, win_doppler: str = "boxcar"):
+        """
+        Calculate range-Doppler map by applying an FFT along the slow time.
+
+        Parameters
+        ----------
+        zp_fact : float, optional
+            Zero-padding factor, by default 1
+        win_doppler : str, optional
+            Window function used for Doppler processing. Default is 'boxcar'.
+
+        """
+        if self.rp is None:
+            raise TypeError(
+                'rp is None. It has to be calculated first')
+        else:
+            if self.N_s > 1:
+                win = scipy.signal.windows.get_window(win_doppler, self.N_s)
+                win = win[np.newaxis, np.newaxis, :, np.newaxis]
+                z = 2**nextpow2(zp_fact * self.N_s)
+                self.rd = np.fft.fft(self.rp, n=z, axis=2)
+            else:
+                self.rd = self.rp
+
     def process_radar_cube(self):
         self.range_compression(self)
         self.doppler_processing(self)
@@ -386,7 +417,8 @@ class FMCWRadar(Radar):
     """
 
     def __init__(self, B: float, fc: float, N_f: int, N_s: int, T_f: float,
-                 T_s: float, win_range: str = 'hann', if_real: bool = True, **kwargs):
+                 T_s: float, win_range: str = 'hann', win_doppler: str = "boxcar",
+                 if_real: bool = True, **kwargs):
         self.B = B
         self.fc = fc
         self.N_f = N_f
@@ -396,9 +428,8 @@ class FMCWRadar(Radar):
         self.if_real = if_real
         self.s_if = None
         self.win_range = scipy.signal.windows.get_window(win_range, N_f)
-        super().__init__(**kwargs)
-        # slow time vec. (unif. chirp sequence)
-        self.t_s = np.arange(N_s) * T_s
+        self.win_doppler = scipy.signal.windows.get_window(win_doppler, N_s)
+        super().__init__(N_s=N_s, T_s=T_s, **kwargs)
 
     def sim_chirps(self):
         self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
