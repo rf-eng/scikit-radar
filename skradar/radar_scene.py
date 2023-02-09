@@ -401,6 +401,7 @@ class FMCWRadar(Radar):
         self.T_s = T_s
         self.if_real = if_real
         self.s_if = None
+        self.s_if_bursts = None
         self.win_range = scipy.signal.windows.get_window(win_range, N_f)
         self.win_doppler = scipy.signal.windows.get_window(win_doppler, N_s)
         super().__init__(N_s=N_s, T_s=T_s, **kwargs)
@@ -427,6 +428,22 @@ class FMCWRadar(Radar):
                         s_if_tmp = sim_FMCW_if(
                             dist, self.B, self.fc, self.N_f, self.T_s)
                         self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
+                        
+    def add_burst(self):
+        """
+        Generate a new burst of IF signals and append to the array of bursts.
+
+        Returns
+        -------
+        None.
+
+        """
+        self.sim_chirps(self)
+        if self.s_if_bursts is None:
+            self.s_if_bursts = self.s_if[:, :, np.newaxis, :, :]
+        else:
+            np.concatenate(
+                (self.s_if_bursts, self.s_if[:, :, np.newaxis, :, :]), axis=2)
 
     def range_compression(self, zp_fact: float):
         """
