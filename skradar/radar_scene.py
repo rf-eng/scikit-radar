@@ -327,7 +327,7 @@ class Radar(Thing, ABC):
             raise TypeError(
                 'rp is None. It has to be calculated first')
         elif self.M_rx < 2:
-            warnings.warn(f"Warning: Angle processing doesn't make sense for " +
+            warnings.warn("Warning: Angle processing doesn't make sense for " +
                           "only one antenna. Doing nothing.")
         else:
             # TODO: Check if antennas are on a line
@@ -406,6 +406,17 @@ class FMCWRadar(Radar):
         super().__init__(N_s=N_s, T_s=T_s, **kwargs)
 
     def sim_chirps(self):
+        """
+        Simulate IF signals (slow-time and fast-time samples) for the FMCW radar.
+        
+        The simulated signal results from the sum of the contributions from all 
+        TX, RX and target combinations.
+
+        Returns
+        -------
+        None.
+
+        """
         self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
         for chirp_cntr in range(self.N_s):
             dists = self.calc_dists(chirp_cntr * self.T_s)
