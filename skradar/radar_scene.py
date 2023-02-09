@@ -6,7 +6,7 @@ from pytransform3d.transform_manager import TransformManager
 import pytransform3d.transformations as pt
 from pytransform3d.coordinates import spherical_from_cartesian
 from scipy.constants import speed_of_light as c0
-from skradar import range_compress_FMCW, sim_FMCW_if
+from skradar import range_compress_FMCW, sim_FMCW_if, backprojection
 from skradar import nextpow2
 import numpy as np
 import scipy.signal
@@ -291,18 +291,7 @@ class Radar(Thing, ABC):
             x_mat = r_mat * np.sin(ang_mat)
             y_mat = np.zeros_like(x_mat)
             z_mat = r_mat * np.cos(ang_mat)
-            pixel_coord = np.block(
-                [[x_mat.ravel()], [y_mat.ravel()], [z_mat.ravel()]])
-            # calculate distance matrix from each tx to each image pixel:
-            pathlens_tx = scipy.spatial.distance_matrix(
-                pixel_coord.T, self.tx_pos.T)
-            # calculate distance matrix from each rx to each image pixel:
-            pathlens_rx = scipy.spatial.distance_matrix(
-                pixel_coord.T, self.rx_pos.T)
-            if np.max(pathlens_tx) + np.max(pathlens_rx) > np.max(self.ranges):
-                raise ValueError('Image size too large: Range profile does not ' +
-                                 'cover the largest distance TX->pixel->RX.')
-
+            
             # all combinations of TX-, RX-, and pixel-indices
             tx_idcs_mat, rx_idcs_mat, px_idcs_mat = np.mgrid[0:self.M_tx,
                                                              0:self.M_rx,
@@ -311,25 +300,10 @@ class Radar(Thing, ABC):
             rx_idcs = rx_idcs_mat.ravel()
             px_idcs = px_idcs_mat.ravel()
 
-            # calculate round-trip times tx->pixel->rx
-            pathlens = pathlens_tx[px_idcs, tx_idcs] + \
-                pathlens_rx[px_idcs, rx_idcs]
+            image_vec = backprojection(x_mat, y_mat, z_mat, self.tx_pos, self.rx_pos,
+                           tx_idcs, rx_idcs, px_idcs, self.rp, self.ranges, self.kw, self.N_f)
 
-            # Find indices for range profile (nearest neighbor)
-            delta_r = self.ranges[1] - self.ranges[0]
-            pathlen_idcs = np.rint(pathlens / delta_r).astype(int)
-
-            rp_vals = self.rp[tx_idcs, rx_idcs, :,
-                              pathlen_idcs].astype(np.complex64)
-            phase_corr = np.exp(-1j * self.kw * pathlens).astype(np.complex64)
-            # newaxis to support multiple chirps
-            rp_corr = rp_vals * phase_corr[:, np.newaxis]
-            # unravel
-            rp_tmp = rp_corr.reshape(
-                (self.M_tx, self.M_rx, -1, num_ranges * num_angles))
-            # sum over antennas for each pixel and unravel to image
-            self.ra_bp = np.sum(rp_tmp, axis=(0, 1)).reshape(
-                (num_angles, num_ranges))  # inverse indexing since meshgrid is different from mgrid
+            self.ra_bp = image_vec.reshape((num_angles, num_ranges))  # inverse indexing since meshgrid is different from mgrid
             scale_to_amp = 1 / (self.M_rx * self.M_tx)
             self.ra_bp = scale_to_amp * self.ra_bp
 
