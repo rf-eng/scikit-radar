@@ -54,19 +54,28 @@ def range_compress_FMCW(s_if: np.ndarray, win_range: np.ndarray, B: float,
     ranges = np.linspace(0, 1 - 1 / z, z) * (N - 1) * c / B
     return range_profile, ranges
 
-def backprojection(x_mat, y_mat, z_mat, tx_pos, rx_pos, tx_idcs,
-                   rx_idcs, px_idcs, rp, rangevec, kw, N_f):
+
+def backprojection(x_mat, y_mat, z_mat, ant_pos, ant_idcs,
+                   px_idcs, rp, rangevec, kw, N_f, posaxis=(0, 1), rangeaxis=-1):
+
     pixel_coord = np.block(
         [[x_mat.ravel()], [y_mat.ravel()], [z_mat.ravel()]])
-    
+
     num_pixels = pixel_coord.shape[1]
+
+    tx_pos = ant_pos[0]
+    rx_pos = ant_pos[1]
+    tx_idcs = ant_idcs[0]
+    rx_idcs = ant_idcs[1]
 
     # calculate distance matrix from each tx to each image pixel:
     pathlens_tx = scipy.spatial.distance_matrix(
-        pixel_coord.T, tx_pos.T)
+        pixel_coord.T, tx_pos.T, threshold=int(1e9))
+    # select threshold according to you memory to allow fast computation with large temp arrays
+    # could also use sklearn.metrics.pairwise_distances or sklearn.metrics.pairwise.euclidean_distances
     # calculate distance matrix from each rx to each image pixel:
     pathlens_rx = scipy.spatial.distance_matrix(
-        pixel_coord.T, rx_pos.T)
+        pixel_coord.T, rx_pos.T, threshold=int(1e9))
     if np.max(pathlens_tx) + np.max(pathlens_rx) > np.max(rangevec):
         raise ValueError('Image size too large: Range profile does not ' +
                          'cover the largest distance TX->pixel->RX.')
@@ -79,22 +88,43 @@ def backprojection(x_mat, y_mat, z_mat, tx_pos, rx_pos, tx_idcs,
     delta_r = rangevec[1] - rangevec[0]
     pathlen_idcs = np.rint(pathlens / delta_r).astype(int)
 
-    #use np.take for certain axis?
-    rp_vals = rp[tx_idcs, rx_idcs, :,
-                 pathlen_idcs].astype(np.complex64)
+    #use tuple for flexible indexing
+    idcs_list = [slice(0, None)]*rp.ndim
+    if len(posaxis) == 2:  # mimo mode
+        idcs_list[posaxis[0]] = tx_idcs
+        idcs_list[posaxis[1]] = rx_idcs
+        idcs_list[rangeaxis] = pathlen_idcs
+    elif len(posaxis) == 1:  # sar mode
+        idcs_list[posaxis[0]] = tx_idcs
+        idcs_list[rangeaxis] = pathlen_idcs
+    elif type(posaxis) is int:  # sar mode
+        idcs_list[posaxis] = tx_idcs
+        idcs_list[rangeaxis] = pathlen_idcs
+    else:
+        raise TypeError(
+            "posaxis must be either int or a tuple/list/... of length one or two")
+    rp_vals = rp[tuple(idcs_list)].astype(np.complex64)
     flat_phase_correction = np.exp(-1j * 2 * np.pi * (pathlens /
                                    rangevec[-1]) * (N_f - 1) / 2).astype(np.complex64)
     phase_corr = np.exp(-1j * kw * pathlens).astype(np.complex64) * \
         flat_phase_correction
     # newaxis to support multiple chirps
-    rp_corr = rp_vals * phase_corr[:, np.newaxis]
+    # rp_corr = rp_vals * phase_corr[:, np.newaxis]
+    rp_corr = rp_vals.squeeze() * phase_corr
     # unravel
     M_tx = len(np.unique(tx_idcs))
     M_rx = len(np.unique(rx_idcs))
-    rp_tmp = rp_corr.reshape(
-        (M_tx, M_rx, -1, num_pixels))
-    # sum over antennas for each pixels
-    image = np.sum(rp_tmp, axis=(0, 1))
-    # scale_to_amp = 1 / (M_rx * M_tx)
-    # return scale_to_amp * image
+    if len(posaxis) == 2:  # mimo mode
+        rp_tmp = rp_corr.reshape(
+            (M_tx, M_rx, -1, num_pixels))
+        # sum over antennas for each pixel
+        image = np.sum(rp_tmp, axis=posaxis)
+    elif len(posaxis) == 1:  # sar mode
+        rp_tmp = rp_corr.reshape((M_tx, -1))
+        # sum over measurement positions for each pixel
+        image = np.sum(rp_tmp, axis=posaxis[0])
+    elif type(posaxis) is int:  # sar mode
+        rp_tmp = rp_corr.reshape((M_tx, -1))
+        # sum over measurement positions for each pixel
+        image = np.sum(rp_tmp, axis=posaxis)
     return image
