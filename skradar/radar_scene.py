@@ -291,19 +291,19 @@ class Radar(Thing, ABC):
             x_mat = r_mat * np.sin(ang_mat)
             y_mat = np.zeros_like(x_mat)
             z_mat = r_mat * np.cos(ang_mat)
-            
+
             # all combinations of TX-, RX-, and pixel-indices
-            tx_idcs_mat, rx_idcs_mat, px_idcs_mat = np.mgrid[0:self.M_tx,
-                                                             0:self.M_rx,
-                                                             0:num_ranges * num_angles]
+            rx_idcs_mat, tx_idcs_mat, px_idcs_mat = np.meshgrid(
+                np.arange(self.M_rx), np.arange(self.M_tx), np.arange(num_ranges * num_angles))
+
             tx_idcs = tx_idcs_mat.ravel()
             rx_idcs = rx_idcs_mat.ravel()
             px_idcs = px_idcs_mat.ravel()
 
-            image_vec = backprojection(x_mat, y_mat, z_mat, self.tx_pos, self.rx_pos,
-                           tx_idcs, rx_idcs, px_idcs, self.rp, self.ranges, self.kw, self.N_f)
+            image_vec = backprojection(x_mat, y_mat, z_mat, (self.tx_pos, self.rx_pos),
+                           (tx_idcs, rx_idcs), px_idcs, self.rp, self.ranges, self.kw, self.N_f)
 
-            self.ra_bp = image_vec.reshape((num_angles, num_ranges))  # inverse indexing since meshgrid is different from mgrid
+            self.ra_bp = image_vec.reshape((num_angles, num_ranges))
             scale_to_amp = 1 / (self.M_rx * self.M_tx)
             self.ra_bp = scale_to_amp * self.ra_bp
 
