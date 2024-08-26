@@ -7,7 +7,7 @@ import pytransform3d.transformations as pt
 from pytransform3d.coordinates import spherical_from_cartesian
 from scipy.constants import speed_of_light as c0
 from skradar import range_compress_FMCW, sim_FMCW_if, backprojection
-from skradar import nextpow2
+from skradar import nextpow2, dBm2W, dB2lin
 import numpy as np
 import scipy.signal
 import scipy.spatial
@@ -142,7 +142,10 @@ class Radar(Thing, ABC):
             Local 3-d Cartesian coordinate(s) of the M_rx RX antenna(s) in meters.
     """
 
-    def __init__(self, tx_pos: np.ndarray, rx_pos: np.ndarray, N_s: int, T_s: float, **kwargs):
+    def __init__(self, tx_pos: np.ndarray, rx_pos: np.ndarray, N_s: int, T_s: float,
+                 tx_ant_gains: np.ndarray = None, rx_ant_gains: np.ndarray = None,
+                 tx_powers: np.ndarray = None, rx_gains: np.ndarray = None, Z0: float = 50,
+                 **kwargs):
         """
         Create a radar object.
 
@@ -156,6 +159,16 @@ class Radar(Thing, ABC):
             Number of slow time samples.
         T_s : float
             Slow time sampling interval in seconds.
+        tx_ant_gains : np.ndarray, shape(M_tx), optional
+            Antenna gains of TX antenna(s) in dBi. Default: 0 dBi.
+        rx_ant_gains : np.ndarray, shape(M_rx), optional
+            Antenna gains of RX antenna(s) in dBi. Default: 0 dBi.
+        tx_powers : np.ndarray, shape(M_tx), optional
+            Transmit powers at the inputs of each TX antenna in dBm. Default: 0 dBm.
+        rx_gains : np.ndarray, shape(M_rx), optional
+            Gain(s) in the RX sections(s) in dB. Default: 0 dB.
+        Z0 : float, optional
+            Reference impedance. Default: 50 Ohm.
         **kwargs : optional
             Remaining keyword arguments are passed to constructor of the
             Thing class.
@@ -181,6 +194,23 @@ class Radar(Thing, ABC):
                 f'Expected rx_pos with 3 rows but got {rx_pos.shape[0]}.')
         else:
             self.rx_pos = rx_pos
+        if tx_ant_gains is None:
+            self.tx_ant_gains = np.ones(self.M_tx)  # isotropic radiator
+        else:
+            self.tx_ant_gains = dB2lin(tx_ant_gains)
+        if rx_ant_gains is None:
+            self.rx_ant_gains = np.ones(self.M_rx)  # isotropic radiator
+        else:
+            self.rx_ant_gains = dB2lin(rx_ant_gains)
+        if tx_powers is None:
+            self.tx_powers = dBm2W(np.zeros(self.M_tx))  # zero dBm on all TXs
+        else:
+            self.tx_ant_gains = dBm2W(tx_powers)
+        if rx_gains is None:
+            self.rx_gains = np.ones(self.M_rx)  # 0 dB on all RXs
+        else:
+            self.rx_gains = dB2lin(rx_gains)
+        self.Z0 = Z0
         self.targets = None
         self.rp = None  # range profile
         
@@ -249,7 +279,7 @@ class Radar(Thing, ABC):
                 for rx_cntr in range(self.M_rx):  # all tx/rx combinations
                     dists[tx_cntr, rx_cntr,
                           targ_cntr] = tx_dist[tx_cntr] + rx_dist[rx_cntr]
-        return dists
+        return dists, tx_dist, rx_dist
 
     @abstractmethod
     def range_compression(self):
@@ -420,12 +450,21 @@ class FMCWRadar(Radar):
         """
         self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
         for chirp_cntr in range(self.N_s):
-            dists = self.calc_dists(chirp_cntr * self.T_s)
+            dists, tx_dist, rx_dist = self.calc_dists(chirp_cntr * self.T_s)
             for tx_cntr in range(self.M_tx):
                 for rx_cntr in range(self.M_rx):
                     for targ_cntr in range(self.N_targ):  # sum over targets
                         dist = dists[tx_cntr, rx_cntr, targ_cntr]
-                        s_if_tmp = sim_FMCW_if(
+                        # radar equation step-by-step
+                        p_tx_eirp = self.tx_powers[tx_cntr] * self.tx_ant_gains[tx_cntr]
+                        s_targ = p_tx_eirp/(4*np.pi*tx_dist[tx_cntr]**2)  # power density at target
+                        p_refl = s_targ*self.targets[targ_cntr].rcs  # power reflected from target
+                        s_rx = p_refl/(4*np.pi*rx_dist[rx_cntr]**2)  # power density at receiver
+                        lambd = c0/self.fc
+                        a_eff = self.rx_ant_gains[rx_cntr]*lambd**2/(4*np.pi)  # effective RX antenna area
+                        p_rx = s_rx * a_eff * self.rx_gains[rx_cntr]  # power of IF signal
+                        A_pk = np.sqrt(2)*np.sqrt(p_rx * self.Z0)  # power to amplitude
+                        s_if_tmp = A_pk*sim_FMCW_if(
                             dist, self.B, self.fc, self.N_f, self.T_s)
                         self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
                         
