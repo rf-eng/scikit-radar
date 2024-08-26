@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skradar"
+authors = [
+    {name = "Reinhard Feger"},
+]
+description = "Radar processing and simulation in Python"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+classifiers = ['Development Status :: 1 - Planning',
+                 'Intended Audience :: Developers',
+                 'Intended Audience :: Science/Research',
+                 'License :: OSI Approved :: BSD License',
+                 'Topic :: Scientific/Engineering',]
+dependencies = [
+    "numpy", "scipy", "pytransform3d>=3.5",
+]
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = {attr = "skradar.version.__version__"}
+
+[project.urls]
+repository = "https://github.com/rf-eng/scikit-radar"
