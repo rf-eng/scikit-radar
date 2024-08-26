@@ -5,7 +5,7 @@ from pytransform3d.transformations import vector_to_point, transform
 from pytransform3d.transform_manager import TransformManager
 import pytransform3d.transformations as pt
 from pytransform3d.coordinates import spherical_from_cartesian
-from scipy.constants import speed_of_light as c0
+from scipy.constants import speed_of_light as c0, Boltzmann
 from skradar import range_compress_FMCW, sim_FMCW_if, backprojection
 from skradar import nextpow2, dBm2W, dB2lin
 import numpy as np
@@ -144,7 +144,8 @@ class Radar(Thing, ABC):
 
     def __init__(self, tx_pos: np.ndarray, rx_pos: np.ndarray, N_s: int, T_s: float,
                  tx_ant_gains: np.ndarray = None, rx_ant_gains: np.ndarray = None,
-                 tx_powers: np.ndarray = None, rx_gains: np.ndarray = None, Z0: float = 50,
+                 tx_powers: np.ndarray = None, rx_gains: np.ndarray = None,
+                 Z0: float = 50, T_ref: float = 293,
                  **kwargs):
         """
         Create a radar object.
@@ -168,7 +169,9 @@ class Radar(Thing, ABC):
         rx_gains : np.ndarray, shape(M_rx), optional
             Gain(s) in the RX sections(s) in dB. Default: 0 dB.
         Z0 : float, optional
-            Reference impedance. Default: 50 Ohm.
+            Reference impedance in Ohm. Default: 50 Ohm.
+        T_ref : float, optional
+            Reference temperature in Kelvin. Default: Room temperature 293 K.
         **kwargs : optional
             Remaining keyword arguments are passed to constructor of the
             Thing class.
@@ -211,11 +214,15 @@ class Radar(Thing, ABC):
         else:
             self.rx_gains = dB2lin(rx_gains)
         self.Z0 = Z0
+        self.T_ref = T_ref
         self.targets = None
         self.rp = None  # range profile
         
         # slow time vec. (unif. chirp sequence)
         self.t_s = np.arange(N_s) * T_s
+
+        # random number generator
+        self.rng = np.random.default_rng()
         super().__init__(**kwargs)
 
     @property
@@ -299,7 +306,8 @@ class Radar(Thing, ABC):
     def extract_mimo(self):
         raise NotImplementedError('Function not implemented yet')
 
-    def angle_proc_bp(self, ranges_bp: np.ndarray, angles_bp: np.ndarray):
+    def angle_proc_bp(self, ranges_bp: np.ndarray, angles_bp: np.ndarray,
+                      process_noisy: bool = True):
         # ranges_bp contains distances to image pixels (not round-trip)
         if self.rp is None:
             raise TypeError(
@@ -336,8 +344,14 @@ class Radar(Thing, ABC):
             self.ra_bp = image_vec.reshape((num_angles, num_ranges))
             scale_to_amp = 1 / (self.M_rx * self.M_tx)
             self.ra_bp = scale_to_amp * self.ra_bp
+            if process_noisy:
+                image_vec = backprojection(x_mat, y_mat, z_mat, (self.tx_pos, self.rx_pos),
+                           (tx_idcs, rx_idcs), px_idcs, self.rp_noisy, self.ranges, self.kw, self.N_f)
+                self.ra_bp_noisy = image_vec.reshape((num_angles, num_ranges))
+                self.ra_bp_noisy = scale_to_amp * self.ra_bp_noisy
 
-    def angle_proc_RX_DFT(self, zp_fact: float = 1, win_rx: str = 'boxcar'):
+    def angle_proc_RX_DFT(self, zp_fact: float = 1, win_rx: str = 'boxcar',
+                          process_noisy: bool = True):
         """
         Calculate angle-FFT along the RX antennas for all range-profile samples.
 
@@ -347,6 +361,8 @@ class Radar(Thing, ABC):
             Zero-padding factor
         win_rx : str, optional
             Window function used for RX-only beamforming. Default is 'boxcar'.
+        process_noisy : bool
+            Determines if both noiseless and noisy signals are processed. Default: true
 
         Returns
         -------
@@ -369,6 +385,9 @@ class Radar(Thing, ABC):
             scale_to_amp = 1 / (self.M_rx * win_coh_gain)
             self.ra = scale_to_amp * np.fft.fft(self.rp * win, n=z, axis=-3)
             self.ra = np.fft.fftshift(self.ra, axes=-3)
+            if process_noisy:
+                self.ra_noisy = scale_to_amp * np.fft.fft(self.rp_noisy * win, n=z, axis=-3)
+                self.ra_noisy = np.fft.fftshift(self.ra_noisy, axes=-3)
             u_vec = 2 * np.fft.fftshift(np.fft.fftfreq(z))
             self.angles = np.arcsin(u_vec)
 
@@ -376,7 +395,8 @@ class Radar(Thing, ABC):
         self.extract_mimo()
         raise NotImplementedError('Function not implemented yet')
 
-    def doppler_processing(self, zp_fact: float = 1, win_doppler: str = "boxcar"):
+    def doppler_processing(self, zp_fact: float = 1, win_doppler: str = "boxcar",
+                           process_noisy: bool=True):
         """
         Calculate range-Doppler map by applying an FFT along the slow time.
 
@@ -386,6 +406,8 @@ class Radar(Thing, ABC):
             Zero-padding factor, by default 1
         win_doppler : str, optional
             Window function used for Doppler processing. Default is 'boxcar'.
+        process_noisy : bool
+            Determines if both noiseless and noisy signals are processed. Default: true
 
         """
         if self.rp is None:
@@ -397,6 +419,11 @@ class Radar(Thing, ABC):
                 win = win[np.newaxis, np.newaxis, :, np.newaxis]
                 z = 2**nextpow2(zp_fact * self.N_s)
                 self.rd = np.fft.fft(self.rp, n=z, axis=2)
+                if process_noisy:
+                    if self.rp_noisy is None:
+                        raise TypeError(
+                            'rp_noisy is None. It has to be calculated first')
+                    self.rd_noisy = np.fft.fft(self.rp_noisy, n=z, axis=2)
             else:
                 self.rd = self.rp
 
@@ -449,6 +476,7 @@ class FMCWRadar(Radar):
 
         """
         self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
+        self.s_if_noisy = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
         for chirp_cntr in range(self.N_s):
             dists, tx_dist, rx_dist = self.calc_dists(chirp_cntr * self.T_s)
             for tx_cntr in range(self.M_tx):
@@ -465,8 +493,22 @@ class FMCWRadar(Radar):
                         p_rx = s_rx * a_eff * self.rx_gains[rx_cntr]  # power of IF signal
                         A_pk = np.sqrt(2)*np.sqrt(p_rx * self.Z0)  # power to amplitude
                         s_if_tmp = A_pk*sim_FMCW_if(
-                            dist, self.B, self.fc, self.N_f, self.T_s)
+                            dist, self.B, self.fc, self.N_f, self.T_s, cplx=not(self.if_real))
                         self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
+            if self.if_real:
+                fs = 1/self.T_f
+                noise_std = np.sqrt(4*self.Z0*Boltzmann*self.T_ref*fs/2)
+                self.noise = self.rng.normal(0, noise_std, (self.M_rx, self.N_s, self.N_f))
+            else:
+                raise NotImplementedError('Complex-valued FMCW IF noise not implemented yet')
+            # multiple TXs and/or multiple targets do not add noise
+            # noise will be only added for each RX, slow-time sample and fast-time sample
+            tx_cntr = 0
+            for chirp_cntr in range(self.N_s):
+                for rx_cntr in range(self.M_rx):
+                    self.s_if_noisy[tx_cntr, rx_cntr,
+                                    chirp_cntr, :] = (self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] + 
+                                                      self.noise[rx_cntr, chirp_cntr, :])
                         
     def add_burst(self):
         """
@@ -484,7 +526,7 @@ class FMCWRadar(Radar):
             np.concatenate(
                 (self.s_if_bursts, self.s_if[:, :, np.newaxis, :, :]), axis=2)
 
-    def range_compression(self, zp_fact: float):
+    def range_compression(self, zp_fact: float, process_noisy: bool=True):
         """
         Perform range compression and amplitude scaling on the previously simulated or measured intermediate frequency data.
 
@@ -496,6 +538,8 @@ class FMCWRadar(Radar):
         zp_fact : float            
             Zero-padding factor. The IF signal is zero-padded to
             2**nextpow2(zp_fact*N) with N being the number of samples in s_if.
+        process_noisy : bool
+            Determines if both noiseless and noisy signals are processed. Default: true
 
         Raises
         ------
@@ -522,6 +566,14 @@ class FMCWRadar(Radar):
                 self.s_if, self.win_range, self.B, zp_fact,
                 self.scene.c, flatten_phase)
             self.rp = scale_to_amp * self.rp
+            if process_noisy:
+                if self.s_if_noisy is None:
+                    raise TypeError(
+                        's_if is None. It has to be simulated or loaded first')
+                self.rp_noisy, self.ranges = range_compress_FMCW(
+                    self.s_if_noisy, self.win_range, self.B, zp_fact,
+                    self.scene.c, flatten_phase)
+                self.rp_noisy = scale_to_amp * self.rp_noisy
 
 
 class Scene:
