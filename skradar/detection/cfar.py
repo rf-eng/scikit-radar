@@ -13,7 +13,7 @@ class CFARMode(Enum):
 class CFARConfig:
     mode: CFARMode = CFARMode.CA
     train_cells: int = 3
-    gard_cells: int = 0
+    guard_cells: int = 0
     pfa: float = 1e-4
 
 
@@ -33,9 +33,11 @@ def cfar_threshold(sig: np.ndarray, cfg: CFARConfig = DEFAULT_CFG):
     scale = 1 / cfg.train_cells
 
     kernel = np.full(cfg.train_cells, scale)
-    corr = np.correlate(sig, kernel)
+    pad = cfg.train_cells + cfg.guard_cells
+    sig_pad = np.hstack((sig[-pad:], sig, sig[:pad]))
+    corr = np.correlate(sig_pad, kernel, mode='valid')
 
-    offset = cfg.train_cells + 2 * cfg.gard_cells + 1
+    offset = cfg.train_cells + 2 * cfg.guard_cells + 1
     left = corr[:-offset]
     right = corr[offset:]
 
