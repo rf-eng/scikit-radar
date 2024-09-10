@@ -49,7 +49,9 @@ def cfar_threshold(sig: np.ndarray, cfg: CFARConfig = DEFAULT_CFG):
         case _:
             raise ValueError(f"CFAR mode '{str(cfg.mode)}' is not supported")
 
-    nw2 = 2 * cfg.train_cells
-    alpha = nw2 * (cfg.pfa ** (-1 / nw2) - 1)
+    L = 2 * cfg.train_cells
+    alpha = np.sqrt(4 / np.pi * L * (cfg.pfa**(-1 / L) - 1) *
+                    (1 - (1 - np.pi / 4) * np.exp(-L + 1)))  # see doi.org/10.1049/el:19891131
+
     threshold = alpha * corr
     return threshold
