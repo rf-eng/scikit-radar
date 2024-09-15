@@ -475,8 +475,12 @@ class FMCWRadar(Radar):
         None.
 
         """
-        self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
-        self.s_if_noisy = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
+        if self.if_real:
+            self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
+            self.s_if_noisy = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
+        else:
+            self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f), dtype=complex)
+            self.s_if_noisy = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f), dtype=complex)
         for chirp_cntr in range(self.N_s):
             dists, tx_dist, rx_dist = self.calc_dists(chirp_cntr * self.T_s)
             for tx_cntr in range(self.M_tx):
@@ -495,20 +499,24 @@ class FMCWRadar(Radar):
                         s_if_tmp = A_pk*sim_FMCW_if(
                             dist, self.B, self.fc, self.N_f, self.T_s, cplx=not(self.if_real))
                         self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
-            if self.if_real:
-                fs = 1/self.T_f
-                noise_std = np.sqrt(4*self.Z0*Boltzmann*self.T_ref*fs/2)
-                self.noise = self.rng.normal(0, noise_std, (self.M_rx, self.N_s, self.N_f))
-            else:
-                raise NotImplementedError('Complex-valued FMCW IF noise not implemented yet')
-            # multiple TXs and/or multiple targets do not add noise
-            # noise will be only added for each RX, slow-time sample and fast-time sample
-            tx_cntr = 0
-            for chirp_cntr in range(self.N_s):
-                for rx_cntr in range(self.M_rx):
-                    self.s_if_noisy[tx_cntr, rx_cntr,
-                                    chirp_cntr, :] = (self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] + 
-                                                      self.noise[rx_cntr, chirp_cntr, :])
+        self.generate_AWGN()
+
+    def generate_AWGN(self):
+        fs = 1/self.T_f
+        noise_std = np.sqrt(4*self.Z0*Boltzmann*self.T_ref*fs/2)
+        if self.if_real:
+            self.noise = self.rng.normal(0, noise_std, (self.M_rx, self.N_s, self.N_f))
+        else:
+            self.noise = (self.rng.normal(0, noise_std/np.sqrt(2), (self.M_rx, self.N_s, self.N_f))+
+                         1j*self.rng.normal(0, noise_std/np.sqrt(2), (self.M_rx, self.N_s, self.N_f)))
+        # multiple TXs and/or multiple targets do not add noise
+        # noise will be only added for each RX, slow-time sample and fast-time sample
+        tx_cntr = 0
+        for chirp_cntr in range(self.N_s):
+            for rx_cntr in range(self.M_rx):
+                self.s_if_noisy[tx_cntr, rx_cntr,
+                                chirp_cntr, :] = (self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] + 
+                                                    self.noise[rx_cntr, chirp_cntr, :])
                         
     def add_burst(self):
         """
